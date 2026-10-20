@@ -2,10 +2,17 @@ import logging
 import librosa, random
 import numpy as np
 import soundfile as sf
+import sys
 from pathlib import Path
 from data_utils import background_noises, mappings
 
-dataset = 'train'
+try:
+    dataset = sys.argv[1]
+    assert dataset in ['train', 'test']
+except:
+    print("Please run with 'train' or 'test'")
+    exit(1)
+
 timit_dir = Path(f"./timit/{dataset}/")
 output_dir = Path(f"./single_level_data/{dataset}/")
 sound_bible_dir = Path("./musan/noise/sound-bible/")
@@ -73,6 +80,7 @@ def calculate_SNR(signal_file, noise_file, targetsnr):
 
 if __name__ == "__main__":
     # There are 87 sound bible noises and 37 background_noises, totalling 124 noise files to choose from
+    i = 0
     for signal_file in timit_dir.rglob("*.WAV"):
         logging.info('-' * 100)
         logging.info(signal_file.stem)
@@ -89,7 +97,7 @@ if __name__ == "__main__":
         targetsnr = 5 # random.randint(-5, 15)
         logging.info(f"Target SNR: {targetsnr} dB")
         audio_data, speech_sr = calculate_SNR(signal_file, noise_file, targetsnr)
-        sf.write(f"{output_dir}/{signal_file.stem}.wav", audio_data, speech_sr)
-        logging.info(f"Mixed file: {output_dir}\\{signal_file.stem}.wav written successfully.\n\n")
-        
+        sf.write(f"{output_dir}\\{dataset}_{i:04d}.wav", audio_data, speech_sr)
+        logging.info(f"Mixed file: {output_dir}\\{dataset}_{i:04d}.wav written successfully.\n\n")
+        i += 1
     logging.info(f"Successfully mixed all {dataset}ing files.")
