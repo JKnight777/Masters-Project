@@ -14,12 +14,12 @@ except:
     exit(1)
 
 timit_dir = Path(f"./timit/{dataset}/")
-output_dir = Path(f"./single_level_data/{dataset}/")
+output_dir = Path(f"./mixed_data/{dataset}/")
 sound_bible_dir = Path("./musan/noise/sound-bible/")
 background_noise_dir = Path("./musan/noise/free-sound/")
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename=f'{output_dir}/single_level.log', level=logging.INFO)
+logging.basicConfig(filename=f'{output_dir}/mixed.log', level=logging.INFO)
 
 def translate_all():
     timit_dir = Path("./timit")
@@ -94,10 +94,10 @@ if __name__ == "__main__":
         assert noise_file.exists(), f"The selected noise file: {noise_file} does not exist!"
         logging.info(f"Using {signal_file} as speech.")
         logging.info(f"Using {noise_file} as noise.")
-        targetsnr = 5 # random.randint(-5, 15)
+        targetsnr = random.randint(-5, 15)
         logging.info(f"Target SNR: {targetsnr} dB")
         audio_data, speech_sr = calculate_SNR(signal_file, noise_file, targetsnr)
         sf.write(f"{output_dir}\\{dataset}_{i:04d}.wav", audio_data, speech_sr)
         logging.info(f"Mixed file: {output_dir}\\{dataset}_{i:04d}.wav written successfully.\n\n")
         i += 1
-    logging.info(f"Successfully mixed all {dataset}ing files.")
+    logging.info(f"Successfully mixed all {i} {dataset}ing files.")
