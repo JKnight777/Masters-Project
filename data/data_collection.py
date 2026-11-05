@@ -5,21 +5,29 @@ import soundfile as sf
 import sys
 from pathlib import Path
 from data_utils import background_noises, mappings
+from mfcc_extraction import extract_mfccs
 
 try:
     dataset = sys.argv[1]
+    snr_type = sys.argv[2]
     assert dataset in ['train', 'test']
+    assert snr_type in ['mixed', 'single_level', 'clean']
 except:
-    print("Please run with 'train' or 'test'")
+    print("Please run with 'train' or 'test', and 'single_level', 'mixed', or 'clean'")
     exit(1)
 
 timit_dir = Path(f"./timit/{dataset}/")
-output_dir = Path(f"./mixed_data/{dataset}/")
+output_dir = Path(f"./{snr_type}_data/{dataset}/")
 sound_bible_dir = Path("./musan/noise/sound-bible/")
 background_noise_dir = Path("./musan/noise/free-sound/")
+silence_script = Path("./silence.VSS")
+
+CLEAN_PER = 0.15
+SILENT_PER = 0.05
+NOISE_PER = 0.05
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename=f'{output_dir}/mixed.log', level=logging.INFO)
+logging.basicConfig(filename=f'{output_dir}/{snr_type}_{dataset}.log', level=logging.INFO)
 
 def translate_all():
     timit_dir = Path("./timit")
@@ -54,6 +62,7 @@ def calculate_SNR(signal_file, noise_file, targetsnr):
     speech_duration = librosa.get_duration(path=signal_file, sr=speech_sr)
     noise_duration = librosa.get_duration(path=noise_file, sr=speech_sr)
     logging.info(f"Speech duration: {speech_duration}")
+    logging.info(f"Sample rate: {speech_sr}")
 
     noise, _ = librosa.load(noise_file, sr=None)
     repititions = (speech.size + noise.size - 1) // noise.size # Number of times noise must be repeated to meet speech size
@@ -76,28 +85,213 @@ def calculate_SNR(signal_file, noise_file, targetsnr):
 
     audio_data = (speech + scaled_noise)
 
-    return audio_data, speech_sr
+    return audio_data, speech_sr, snr
+
+def generate_silence(duration, sr, seed = None):
+    rng = np.random.default_rng(seed)
+    n_samples = round(duration * sr)
+
+    if n_samples < 1:
+        raise ValueError("Duration must produce at least one sample.")
+
+    audio = rng.standard_normal(n_samples)
+
+    # Set the RMS amplitude to a random dBFS level.
+    level_dbfs = rng.uniform(-75, -50)
+
+    current_rms = np.sqrt(np.mean(audio ** 2))
+    target_rms = 10 ** (level_dbfs / 20)
+    audio *= target_rms / current_rms
+
+    return audio
+
+def generate_noise(duration, sr, source, seed = None):
+    rng = np.random.default_rng(seed)
+
+    noise, _ = librosa.load(source, sr=None)
+    noise_duration = librosa.get_duration(path=source, sr=None)
+    repititions = int(duration // noise_duration) + 1 # Number of times noise must be repeated to meet speech size
+    noise = np.tile(noise, repititions)[:int(duration * sr)] # Scale up or not at all, and avoid spill-over.
+    
+    logging.info(f"Original noise duration: {noise_duration} seconds, Scaled to final duration: {librosa.get_duration(y=noise, sr=sr)} seconds")
+    
+    audio = np.asarray(noise, dtype=np.float64)
+    current_rms = np.sqrt(np.mean(audio ** 2))
+    target_dbfs = rng.uniform(-47, -27) if snr_type == 'mixed' else -37
+    target_rms = 10 ** (target_dbfs / 20)
+    scaled_audio = audio * (target_rms / current_rms)
+
+    return scaled_audio
 
 if __name__ == "__main__":
-    # There are 87 sound bible noises and 37 background_noises, totalling 124 noise files to choose from
+    # There are 87 sound bible noises and 37 background_noises, totaling 124 noise files to choose from
     i = 0
-    for signal_file in timit_dir.rglob("*.WAV"):
+    samples = list(timit_dir.rglob('*.WAV')) # Get all wav files in directory
+    random.shuffle(samples) # Randomize samples
+    total_samples = len(samples)
+
+    if snr_type == 'clean':
+        num_clean = total_samples
+        clean = samples
+        samples = []
+
+    else:
+        num_clean = int((total_samples * CLEAN_PER) // (1.0 - SILENT_PER - NOISE_PER)) # cx / 1 - a - b  
+        clean = samples[:num_clean] # Separate and reserve clean for later.
+        samples = samples[num_clean:]
+
+
+    average_snr = 0.0
+
+    # Mix remaining samples
+    for signal_file in samples:
         logging.info('-' * 100)
         logging.info(signal_file.stem)
+        if snr_type == 'clean': # Copy paste files and calculate MFCCs.
+            logging.info(f"Using {signal_file} as speech.")
+            mixed_file = f"{output_dir}\\{dataset}_{i:04d}.wav"
+            audio, speech_sr = librosa.load(signal_file, sr=None)
+            audio_data = np.asarray(audio, dtype=np.float64)
+            sf.write(mixed_file, audio_data, speech_sr)
+            logging.info(f"Clean file: {output_dir}\\{dataset}_{i:04d}.wav written successfully.\n")
+            
+        # Mix noise with clean data.
         selection = random.randint(0, 123)
         if selection > 86:
-            # Use a background noise instead
+            # Use a background noise instead.
             noise_file = background_noise_dir / f"{background_noises[selection - 87]}.wav"
         else:
             noise_file = sound_bible_dir / f'noise-sound-bible-{selection:04d}.wav'
-        assert signal_file.exists(), f"The selected speech file: {signal_file} does not exist!"
+
         assert noise_file.exists(), f"The selected noise file: {noise_file} does not exist!"
         logging.info(f"Using {signal_file} as speech.")
         logging.info(f"Using {noise_file} as noise.")
-        targetsnr = random.randint(-5, 15)
+        targetsnr = random.randint(-5, 15) if snr_type == 'mixed' else 5.0
         logging.info(f"Target SNR: {targetsnr} dB")
-        audio_data, speech_sr = calculate_SNR(signal_file, noise_file, targetsnr)
-        sf.write(f"{output_dir}\\{dataset}_{i:04d}.wav", audio_data, speech_sr)
-        logging.info(f"Mixed file: {output_dir}\\{dataset}_{i:04d}.wav written successfully.\n\n")
+        audio_data, speech_sr, snr = calculate_SNR(signal_file, noise_file, targetsnr)
+
+        average_snr += snr
+
+        mixed_file = f"{output_dir}\\{dataset}_{i:04d}.wav"
+        sf.write(mixed_file, audio_data, speech_sr)
+        logging.info(f"Mixed file: {output_dir}\\{dataset}_{i:04d}.wav written successfully.\n")
+
+        # Once mixed file is generated, caluclate mfccs and truths using the converted script file.
+        try:
+            phn_script = signal_file.with_suffix('.VSS')
+            assert phn_script.exists(), f"{phn_script} was not found! No data will be generated for {mixed_file}!"
+            logging.info(f"Script used: {phn_script}.\n\n")
+            x, y, labels, config = extract_mfccs(mixed_file, phn_script)
+            # Save to compressed numpy file.
+            np.savez_compressed(
+                f'{output_dir}\\{dataset}_{i:04d}.npz',
+                x=x,
+                y=y,
+                labels=labels,
+                config_json = config
+            )
+        except Exception as e:
+            logging.error(f"Something went wrong: {e}")
         i += 1
-    logging.info(f"Successfully mixed all {i} {dataset}ing files.")
+
+    # Calculate and Save clean samples
+    logging.info('-' * 100)
+    for signal_file in clean:
+        logging.info(signal_file.stem)
+        
+        # Copy paste files and calculate MFCCs.
+        dest = f"{output_dir}\\{dataset}_{i:04d}.wav"
+        audio, speech_sr = librosa.load(signal_file, sr=None)
+        audio_data = np.asarray(audio, dtype=np.float64)
+        sf.write(dest, audio_data, speech_sr)
+        logging.info(f"Clean file: {output_dir}\\{dataset}_{i:04d}.wav written successfully.\n")
+
+        try:
+            phn_script = signal_file.with_suffix('.VSS')
+            assert phn_script.exists(), f"{phn_script} was not found! No data will be generated for {signal_file}!"
+            logging.info(f"Script used: {phn_script}.\n\n")
+            x, y, labels, config = extract_mfccs(signal_file, phn_script)
+            # Save to compressed numpy file.
+            np.savez_compressed(
+                f'{output_dir}\\{dataset}_{i:04d}.npz',
+                x=x,
+                y=y,
+                labels=labels,
+                config_json = config
+            )
+        except Exception as e:
+            logging.error(f"Something went wrong: {e}")
+
+        i += 1
+
+    logging.info('-' * 100)
+    # Create 15% clean (no noise added), 5% silent, 5% noise only options as well for noise datasets. (10% silence only for clean dataset)
+    if snr_type == 'clean':
+        num_silent = int(((total_samples * (SILENT_PER + NOISE_PER)) / (1.0 - SILENT_PER - NOISE_PER))) # ax / (1 - a - b)
+        num_noise = 0
+    else:
+        num_silent = int(((total_samples * SILENT_PER) / (1.0 - SILENT_PER - NOISE_PER))) # ax / (1 - a - b)
+        num_noise = int(((total_samples * NOISE_PER) / (1.0 - SILENT_PER - NOISE_PER))) # ax / (1 - a - b)
+
+    for _ in range(num_silent):
+        duration = round(random.uniform(1.5, 4.0), 2)
+        audio_data = generate_silence(duration=duration, sr=16000)
+        dest = f"{output_dir}\\{dataset}_{i:04d}.wav"
+        sf.write(dest, audio_data, 16000)
+        logging.info(f"Silent file: {output_dir}\\{dataset}_{i:04d}.wav of {duration} sec was written successfully.\n")
+
+        try:
+            assert silence_script.exists(), f"{silence_script} was not found! No data will be generated for {dest}!"
+            logging.info(f"Script used: {silence_script}.\n\n")
+            x, y, labels, config = extract_mfccs(dest, silence_script)
+            # Save to compressed numpy file.
+            np.savez_compressed(
+                f'{output_dir}\\{dataset}_{i:04d}.npz',
+                x=x,
+                y=y,
+                labels=labels,
+                config_json = config
+            )
+        except Exception as e:
+            logging.error(f"Something went wrong: {e}")
+
+        i += 1
+
+    for _ in range(num_noise):
+        selection = random.randint(0, 123)
+        if selection > 86:
+            # Use a background noise instead.
+            noise_file = background_noise_dir / f"{background_noises[selection - 87]}.wav"
+        else:
+            noise_file = sound_bible_dir / f'noise-sound-bible-{selection:04d}.wav'
+
+        assert noise_file.exists(), f"The selected noise file: {noise_file} does not exist!"
+
+        duration = round(random.uniform(1.5, 4.0), 2)
+        audio_data = generate_noise(duration=duration, source=noise_file, sr=16000)
+        dest = f"{output_dir}\\{dataset}_{i:04d}.wav"
+        sf.write(dest, audio_data, 16000)
+        logging.info(f"Noise file: {output_dir}\\{dataset}_{i:04d}.wav of {duration} sec was written successfully.\n")
+
+        try:
+            assert silence_script.exists(), f"{silence_script} was not found! No data will be generated for {dest}!"
+            logging.info(f"Script used: {silence_script}.\n\n")
+            x, y, labels, config = extract_mfccs(dest, silence_script)
+            # Save to compressed numpy file.
+            np.savez_compressed(
+                f'{output_dir}\\{dataset}_{i:04d}.npz',
+                x=x,
+                y=y,
+                labels=labels,
+                config_json = config
+            )
+        except Exception as e:
+            logging.error(f"Something went wrong: {e}")
+
+        i += 1
+
+    total_samples += (num_noise + num_silent)
+        
+    logging.info(f"Successfully created all {i} {dataset}ing files. ({round((len(clean) / total_samples), 2) * 100}% clean, {round((num_silent / total_samples), 2) * 100}% silent, {round((num_noise / total_samples), 2) * 100}% noise).")
+    if snr_type != 'clean':
+        logging.info(f"Average SNR of all mixed files: {round(average_snr / len(samples), 2)} dB")
