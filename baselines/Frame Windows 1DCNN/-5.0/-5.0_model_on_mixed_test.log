@@ -1,0 +1,32 @@
+INFO:root:Python Random Seed: 2085648657319686067
+INFO:root:Tensorflow Seed: 2216926976
+INFO:root:
+Weight File: -5.0\-5.0_model_01.weights.h5
+INFO:root:Training mixed model. Model is made up of 2 Dense hidden layers, 128 -> 64. Both activated using Relu
+INFO:root:
+Test Results:
+INFO:root:Loss: 1.3135026693344116
+INFO:root:Macro F1: 45.15%
+INFO:root:Accuracy: 56.49%
+
+INFO:root:
+Weight File: -5.0\-5.0_model_02.weights.h5
+INFO:root:Training mixed model. Model is made up of 2 Dense hidden layers, 128 -> 64. Both activated using Relu
+INFO:root:
+Test Results:
+INFO:root:Loss: 1.3249478340148926
+INFO:root:Macro F1: 44.25%
+INFO:root:Accuracy: 56.14%
+
+INFO:root:
+Weight File: -5.0\-5.0_model_03.weights.h5
+INFO:root:Training mixed model. Model is made up of 2 Dense hidden layers, 128 -> 64. Both activated using Relu
+INFO:root:
+Test Results:
+INFO:root:Loss: 1.3047935962677002
+INFO:root:Macro F1: 45.88%
+INFO:root:Accuracy: 56.83%
+
+INFO:root:Average Macro F1: 45.09%
+INFO:root:Average Accuracy: 56.49%
+
