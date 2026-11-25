@@ -5,29 +5,55 @@ import soundfile as sf
 import sys
 from pathlib import Path
 from data_utils import background_noises, mappings
-from mfcc_extraction import extract_mfccs
+from mfcc_extraction import extract_mfccs_sf, extract_mfccs_fw
 
 try:
     dataset = sys.argv[1]
     snr_type = sys.argv[2]
     assert dataset in ['train', 'test']
     assert snr_type in ['mixed', 'single_level', 'clean']
+    run = sys.argv[3]
+    if dataset == 'train':
+        if snr_type == 'single_level':
+            SINGLE_LEVEL = float(sys.argv[4])
+            output_dir = Path(f"./{SINGLE_LEVEL}_data_{run}/")
+        else:
+            output_dir = Path(f"./{snr_type}_data_{run}/")
+    else:
+        if snr_type == 'single_level':
+            SINGLE_LEVEL = float(sys.argv[4])
+            output_dir = Path(f"./Test Sets/{SINGLE_LEVEL}/")
+        else:
+            output_dir = Path(f"./Test Sets/{snr_type}/")
 except:
     print("Please run with 'train' or 'test', and 'single_level', 'mixed', or 'clean'")
     exit(1)
 
+npseed = np.random.SeedSequence()
+rng = np.random.default_rng(npseed)
+
+pyseed = random.randrange(sys.maxsize)
+random.seed(pyseed)
+
 timit_dir = Path(f"./timit/{dataset}/")
-output_dir = Path(f"./{snr_type}_data/{dataset}/")
+# output_dir = Path(f"./{snr_type}_data/{dataset}/")
 sound_bible_dir = Path("./musan/noise/sound-bible/")
 background_noise_dir = Path("./musan/noise/free-sound/")
 silence_script = Path("./silence.VSS")
+
+output_dir.mkdir(parents=True, exist_ok=True)
 
 CLEAN_PER = 0.15
 SILENT_PER = 0.05
 NOISE_PER = 0.05
 
+extract_mfccs = extract_mfccs_sf
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename=f'{output_dir}/{snr_type}_{dataset}.log', level=logging.INFO)
+
+logging.info(f"Numpy Seed: {npseed.entropy}")
+logging.info(f"Python Random Seed: {pyseed}")
 
 def translate_all():
     timit_dir = Path("./timit")
@@ -55,7 +81,6 @@ def calculate_SNR(signal_file, noise_file, targetsnr):
     Power of the signal is the clean TIMIT audio only in db.
     Power of the noise is the noise from MUSAN only in db.
     Calculate the power of each speech clip alone before mixing.
-    Grab amplitude of the wav file from several samples. 
     '''
 
     speech, speech_sr = librosa.load(signal_file, sr=None)
@@ -88,7 +113,6 @@ def calculate_SNR(signal_file, noise_file, targetsnr):
     return audio_data, speech_sr, snr
 
 def generate_silence(duration, sr, seed = None):
-    rng = np.random.default_rng(seed)
     n_samples = round(duration * sr)
 
     if n_samples < 1:
@@ -106,7 +130,6 @@ def generate_silence(duration, sr, seed = None):
     return audio
 
 def generate_noise(duration, sr, source, seed = None):
-    rng = np.random.default_rng(seed)
 
     noise, _ = librosa.load(source, sr=None)
     noise_duration = librosa.get_duration(path=source, sr=None)
@@ -147,13 +170,6 @@ if __name__ == "__main__":
     for signal_file in samples:
         logging.info('-' * 100)
         logging.info(signal_file.stem)
-        if snr_type == 'clean': # Copy paste files and calculate MFCCs.
-            logging.info(f"Using {signal_file} as speech.")
-            mixed_file = f"{output_dir}\\{dataset}_{i:04d}.wav"
-            audio, speech_sr = librosa.load(signal_file, sr=None)
-            audio_data = np.asarray(audio, dtype=np.float64)
-            sf.write(mixed_file, audio_data, speech_sr)
-            logging.info(f"Clean file: {output_dir}\\{dataset}_{i:04d}.wav written successfully.\n")
             
         # Mix noise with clean data.
         selection = random.randint(0, 123)
@@ -166,7 +182,7 @@ if __name__ == "__main__":
         assert noise_file.exists(), f"The selected noise file: {noise_file} does not exist!"
         logging.info(f"Using {signal_file} as speech.")
         logging.info(f"Using {noise_file} as noise.")
-        targetsnr = random.randint(-5, 15) if snr_type == 'mixed' else 5.0
+        targetsnr = random.randint(-5, 15) if snr_type == 'mixed' else SINGLE_LEVEL
         logging.info(f"Target SNR: {targetsnr} dB")
         audio_data, speech_sr, snr = calculate_SNR(signal_file, noise_file, targetsnr)
 
